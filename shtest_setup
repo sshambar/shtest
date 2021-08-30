@@ -1,6 +1,6 @@
 # vim:set ft=sh et sw=2 ts=2:
 #
-# shtest v1.0.0 - Shell script testing functions
+# shtest v1.0.1 - Shell script testing functions
 # Author: Scott Shambarger <devel@shambarger.net>
 #
 # Copyright (C) 2021 Scott Shambarger
@@ -490,7 +490,7 @@ shtest::check_env() { # <id> <varname> [ <desc> ]
   local _SHTEST_NAME _SHTEST_ENV="${2}[@]" _SHTEST_NEWVARS=()
   for _SHTEST_NAME in $(compgen -v); do
     [[ ${_SHTEST_NAME} =~ ^_SHTEST_(NEWVARS|NAME|ENV)$ ]] && continue
-    [[ ${_SHTEST_NAME} =~ ^(BASH_*|LINES) ]] && continue
+    [[ ${_SHTEST_NAME} =~ ^(BASH_*|LINES|COLUMNS) ]] && continue
     [[ ${!_SHTEST_ENV} =~ (^| )"${_SHTEST_NAME}"($| ) ]] ||
       _SHTEST_NEWVARS+=("${_SHTEST_NAME}")
   done
