@@ -1,0 +1,624 @@
+# vim:set ft=sh et sw=2 ts=2:
+#
+# shtest v1.0.0 - Shell script testing functions
+# Author: Scott Shambarger <devel@shambarger.net>
+#
+# Copyright (C) 2021 Scott Shambarger
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# === Public Function Reference ===
+#
+#   shtest::verbose [ <level> ]
+#
+#     Displays test descriptions even when test passes.
+#
+#   shtest::quiet
+#
+#     Display only summary report.
+#
+#   shtest::log <msg>
+#
+#     Writes <msg> to shtest message stream (may be muted).
+#
+#   shtest::add_focus <id/pattern>
+#
+#     Show only tests matching <id> or <pattern> (*/? wildcards).
+#
+#   shtest::strict [ "trace" ]
+#
+#     Enables 'set -eEu' bash options, any failures a captured and fail
+#     the next shtest::check_*.  "trace" enables backtrace on failure.
+#
+#   shtest::global_whitelist <pattern>
+#
+#     Strict mode ignores failure of any function matching <pattern>
+#     Useful to allow functions in <pattern> to call functions that
+#     fail without triggering strict-mode failures.
+#
+#   shtest::whitelist <pattern>
+#
+#     As global_whitelist, but only until next shtest::check_* called.
+#
+#   shtest::parse <file>
+#
+#     Runs a bash parse test of <file>, displays errors to stderr,
+#     returns true/false.
+#
+#   shtest::cleanup
+#
+#     Removes all global environment variables and traps set by shtest
+#     Call before exit to avoid warnings on unexpected exit.
+#
+#   shtest::fatal [ <msg> [ <backtrace-skip> ] ]
+#
+#     Exits 1 with text <msg>, optionally printing backtrace (skipping
+#     <backtrace-skip> calls if > 0).
+#
+#   shtest::title <title>
+#
+#     Prints a new section header with <title> (resets <prefix>)
+#
+#   shtest::prefix [ <prefix> ]
+#
+#     Adds <prefix> before all test report <descrition>s (resets if empty).
+#
+#   shtest::check_result <id> <ref> [ <description> ]
+#
+#     Checks $? (most recent function return) against <ref>, which can be:
+#       "t" - $? == 0
+#       "f" - $? != 0
+#       # - $? == #
+#     Displayes "<id> OK", or "<id> FAIL | <desciption>" if failure,
+#     including expected vs actual results.
+#
+#   shtest::check_value <id> <varname> [ <ref> [ <desc> ] ]
+#
+#     Checks value of variable named <varname> against <ref>, and
+#     displays "<id> OK" or "<id> FAIL | <description>" including
+#     expected vs actual value.
+#
+#   shtest::check_var <id> [ <ref> [ <desc> ] ]
+#
+#     Shortcut for shtest::check_value <id> "var"...
+#
+#   shtest::check_array <id> <varname> <refname> [ <desc> ]
+#
+#     Checks value of array elements in array named <aname> with those in
+#     array named <refname>, displays "<id> OK" or
+#     "<id> FAIL | <descr>" including expected vs actual value.
+#
+#   shtest::check_file <id> <filename> <contents> [ <desc> ]
+#
+#     Checks contents of <filename> against <contents>, displays
+#     "<id> OK" or "<id> FAIL | <desc>" including expected vs actual
+#     contents.
+#
+#   shtest::reg_file [ <filename> ]
+#
+#     Register <filename> for shtest::check_reg_files tests.
+#     Without <filename>, echos list of registered filenames.
+#
+#   shtest::dereg_file <filename>
+#
+#     Remove <filename> from shtest::check_reg_files tests.
+#
+#   shtest::check_reg_files <id> <desc> [ <fileX_contents>... ]
+#
+#     Checks contents of files registered with shtest::reg_file
+#     in order against <fileX_contents>, displays "<id> OK" or
+#     <id> FAIL | <desc>" including expected vs actual for first
+#     file with mis-matched content.
+#
+#   shtest::last_check_ok
+#
+#     Returns true/false based on the result of the last shtest:check_*
+#
+#   shtest::summary_report
+#
+#     Prints count of tests, with any fail counts.
+#
+#   shtest::reset
+#
+#     Re-initializes shtest for a new run.
+#
+#   shtest::save_env <varname>
+#
+#     Store current shell variable names in <varname>.
+#
+#   shtest::check_env <id> <varname> [ <desc> ]
+#
+#     Checks shell variables against those stored in <varname>, and
+#     displays "<id> OK" or "<id> FAIL | <description>" including
+#     a list of new variables added to the environment.
+#
+# shellcheck shell=bash
+
+shtest::cleanup() {
+  # any cleanup?
+  [[ ${_SHTEST_STATE[0]-} ]] || return 0
+  # check if we own the exit trap
+  if [[ $(trap -p EXIT) =~ trap\ --\ \'shtest::_handle_exit ]]; then
+    # restore the previous trap (or clear it)
+    if [[ ${_SHTEST_STATE[4]-} =~ trap\ --\ \' ]]; then
+      eval "${_SHTEST_STATE[4]}"
+    else
+      trap - EXIT
+    fi
+  fi
+  trap - ERR
+  # cleanup strict tracking file
+  if [[ ${_SHTEST_STATE[2]-} ]]; then
+     [[ -f "${_SHTEST_STATE[2]}" ]] && rm -f "${_SHTEST_STATE[2]}"
+     # unset strict mode
+     set +eu
+  fi
+  # close our log
+  exec 88>&-
+  unset _SHTEST_STATE _SHTEST_TESTLIST _SHTEST_REG_FILES _SHTEST_FOCUS
+  unset _SHTEST_FAILED
+  unset _SHTEST_WHITELIST _SHTEST_GLOBAL_WHITELIST
+}
+
+# initialize all globals
+shtest::_init_globals() {
+
+  local i
+  # internal state
+  # 0 - COUNT, 1 - FAILED, 2 - STRICT, 3 - VERBOSE, 4 - NEXT_EXITTRAP,
+  # 5 - PREFIX, 6 - TRACE, 7 - LAST_CHECK, 8 - MUTE, 9 - TOP_SUBSHELL
+  _SHTEST_STATE=(0 0)
+  for (( i=2; i<=9; i++ )); do _SHTEST_STATE[${i}]=''; done
+  _SHTEST_STATE[9]=${BASH_SUBSHELL}
+  _SHTEST_REG_FILES=() _SHTEST_FOCUS=() _SHTEST_FAILED=()
+
+  # strict mode lists
+  _SHTEST_TESTLIST=() _SHTEST_WHITELIST=() _SHTEST_GLOBAL_WHITELIST=()
+
+  # dup stderr to 88
+  exec 88>&2
+}
+
+# returns 1 if strict mode failed
+shtest::_reset_state() {
+  _SHTEST_STATE[7]='' _SHTEST_WHITELIST=()
+  # if strict handled err, re-enable
+  if [[ ${_SHTEST_STATE[2]} ]]; then
+    [[ $- =~ e ]] || set -eEu
+    [[ -f "${_SHTEST_STATE[2]}" ]] && {
+      rm -f "${_SHTEST_STATE[2]}"; return 1; }
+  fi
+  return 0
+}
+
+shtest::_log() { # <msg>
+  # focus mutes _log too
+  [[ ${_SHTEST_STATE[8]} == 1 ]] && return 0
+  printf >&88 "%s\n" "$*"
+}
+
+shtest::log() { # <msg>
+  [[ ${_SHTEST_STATE[0]+set} == set ]] || {
+    echo >&2 "FATAL: You must call shtest::reset after shtest::cleanup"
+    exit 1
+  }
+  [[ ${_SHTEST_STATE[8]} ]] && return 0
+  shtest::_log "$*"
+}
+
+shtest::_fmtlog() { # <format> <args>
+  local msg
+  [[ ${1-} ]] || return 0
+  # shellcheck disable=SC2059
+  printf -v msg "$1" "${@:2}" ||
+    shtest::fatal "shtest::_fmtlog() bad format: $1" 3
+  shtest::log "${msg}"
+}
+
+# assumes lowest two stack frames can be skipping in backtrace
+shtest::_backtrace() { # <skip>
+  local i depth=${#FUNCNAME[@]} func lno src skip
+  printf 2>/dev/null -v skip "%d" "${1-1}" || skip=1
+  [[ ${skip} -lt 1 ]] && skip=1
+  shtest::log "Backtrace:"
+  for (( i=skip; i < depth; i++ )); do
+    func=${FUNCNAME[${i}]}
+    lno=${BASH_LINENO[(( i - 1 ))]}
+    src=${BASH_SOURCE[${i}]}
+    shtest::_fmtlog "      %s %s %s" "${func}()" "${src-(no file)}" "${lno}"
+  done
+}
+
+shtest::fatal() { # <msg> [ <backtrace-skip> ]
+  # just in case...
+  [[ ${_SHTEST_FATAL-} ]] &&
+    { echo >&2 "shtest::fatal(): called itself!"; exit 1; }
+  _SHTEST_FATAL=1
+  _SHTEST_STATE[8]= # unmute
+  if [[ ${1-} ]]; then
+    shtest::log "FATAL: $1"
+  else
+    shtest::log "Fatal error, quitting..."
+  fi
+  [[ ${2-} ]] && shtest::_backtrace "$2"
+  shtest::cleanup
+  exit 1
+}
+
+shtest::_log_ok() { # <id> <description>
+  local desc=''
+  _SHTEST_STATE[7]=1
+  [[ ${_SHTEST_STATE[3]} ]] && desc="${2:+   | ${_SHTEST_STATE[5]}}${2:-}"
+  shtest::_fmtlog " %-4s OK%s" "$1" "${desc}"
+  [[ ${#_SHTEST_FOCUS[*]} != 0 ]] && _SHTEST_STATE[8]=1
+  return 0
+}
+
+shtest::last_check_ok() { [[ ${_SHTEST_STATE[7]} ]]; }
+
+shtest::_log_fail() { # <id> <description> [ <reason> | <expect> <found> ]
+  local id=${1-} desc="${2:+ | ${_SHTEST_STATE[5]}}${2:-}"
+  shtest::_fmtlog " %-4s FAIL%s" "${id}" "${desc}"
+  if [[ ${3+set} && ${4+set} ]]; then
+    shtest::log "      expected: ${3-}"
+    shtest::log "         found: ${4-}"
+  elif [[ ${3+set} ]]; then
+    shtest::log "        reason: ${3-}"
+  fi
+  ((_SHTEST_STATE[1]++)) || :
+  _SHTEST_FAILED+=("${id}")
+  [[ ${#_SHTEST_FOCUS[*]} != 0 ]] && _SHTEST_STATE[8]=1
+  return 0
+}
+
+shtest::title() { # <title>
+  _SHTEST_STATE[5]=
+  shtest::_reset_state || :
+  [[ $* ]] && shtest::log $'\n'"===== $* ====="$'\n'
+}
+
+shtest::prefix() { # <description-prefix>
+  _SHTEST_STATE[5]="${1-}"
+}
+
+shtest::_check_entry() { # <id> [ <desc> ]
+  local tid id=$1 desc=${2-}
+  ((_SHTEST_STATE[0]++)) || :
+  if [[ ${_SHTEST_TESTLIST[*]-} =~ ${id} ]]; then # quicktest
+    for tid in "${_SHTEST_TESTLIST[@]}"; do
+      [[ ${id} == "${tid}" ]] && shtest::fatal "Duplicate test <id> '${id}'"
+    done
+  fi
+  _SHTEST_TESTLIST+=("${id}")
+  for tid in ${_SHTEST_FOCUS[@]+"${_SHTEST_FOCUS[@]}"}; do
+    [[ ${id} =~ ^${tid}$ ]] && { _SHTEST_STATE[8]=; break; }
+  done
+  shtest::_reset_state && return 0
+  shtest::_log_fail "${id}" "${desc}" "strict mode failure"
+  return 1
+}
+
+shtest::check_result() { # <id> <ref> [ <desc> ] - OK if <ref> == $?, else FAIL
+  # <ref> can be "t": $? == 0, "f": $? != 0, #: $? == #
+  local rc=$? id=${1-} ref=${2-} desc=${3-}
+  [[ ${id} && ${ref} ]] ||
+    shtest::fatal "Usage: shtest::check_result <id> <t | f | #> [ <desc> ]" 3
+
+  shtest::_check_entry "${id}" "${desc}" || return 0
+
+  if [[ "${ref}" == "t" || "${ref}" == "f" ]]; then
+    [[ ${rc} == 0 ]] && rc="t" || rc="f"
+  fi
+  if [[ ${ref} == "${rc}" ]]; then
+    shtest::_log_ok "${id}" "${desc}"
+  elif [[ ${ref} == t ]]; then
+    shtest::_log_fail "${id}" "${desc}" "<true>" "<false>"
+  elif [[ ${ref} == f ]]; then
+    shtest::_log_fail "${id}" "${desc}" "<false>" "<true>"
+  else
+    shtest::_log_fail "${id}" "${desc}" "${ref}" "${rc}"
+  fi
+  return 0
+}
+
+shtest::check_value() { # <id> <varname> [ <ref> [ <desc> ] ]
+  local id=${1-} varname=${2-} ref=${3-} desc=${4-}
+  [[ ${varname} && ${id} ]] || {
+    if [[ ${varname} == var ]]; then
+      shtest::fatal "Usage: shtest::check_var <id> [ <value> [ <desc> ] ]" 4
+    else
+      shtest::fatal "Usage: shtest::check_value <id> <varname> [ <value> [ <desc> ] ]" 3
+    fi
+  }
+
+  shtest::_check_entry "${id}" "${desc}" || return 0
+
+  if [[ ${varname//[a-zA-Z0-0_]/} ]]; then
+    shtest::_log_fail "${id}" "${desc}" "invalid <varname> '${varname}'"
+  elif [[ ${!varname+set} != set ]]; then
+    shtest::_log_fail "${id}" "${desc}" "<varname> '${varname}' is not set"
+  elif [[ ${ref} == "${!varname}" ]]; then
+    shtest::_log_ok "${id}" "${desc}"
+  else
+    shtest::_log_fail "${id}" "${desc}" "\"${ref}\"" "\"${!varname}\""
+  fi
+  return 0
+}
+
+shtest::check_var() { # <id> [ <ref> [ <desc> ] ]
+  shtest::check_value "${1-}" var "${@:2}"
+}
+
+shtest::check_array() { # <id> <varname> <refname> [ <desc> ]
+  local id=${1-} an=${2-} rn=${3-} desc=${4-} alist rlist irn ian i
+  if ! [[ ${id} && ${an} && ${rn} ]]; then
+    shtest::fatal "Usage: shtest::check_array <id> <varname> <refname> [ <desc> ]" 3
+  fi
+  # check valid variable names
+  if [[ ${an//[a-zA-Z0-0_]/} || ${rn//[a-zA-Z0-0_]/} ]]; then
+    shtest::fatal "shtest::check_array var-names must contain only 'a-zA-Z0-9_'" 3
+  fi
+  shtest::_check_entry "${id}" "${desc}" || return 0
+
+  # get list of set items (bash3+ compat)
+  eval rlist="\${!${rn}[*]}" alist="\${!${an}[*]}"
+  [[ ${rlist} == "${alist}" ]] || {
+    shtest::_log_fail "${id}" "${desc}" "set items in ${an} (${alist}) differ from ${rn} (${rlist})"
+    return 0
+  }
+  for i in ${rlist}; do
+    irn=${rn}[${i}] ian=${an}[${i}]
+    [[ ${!irn} != "${!ian}" ]] && {
+      shtest::_log_fail "${id}" "${desc}" "${rn}[$i]=\"${!irn}\"" \
+                        "${an}[$i]=\"${!ian}\""
+      return 0
+    }
+  done
+  shtest::_log_ok "${id}" "${desc}"
+  return 0
+}
+
+shtest::_check_file() { # <id> <filename> <contents> <desc>, sets $rc
+  local id=$1 file=$2 ref=$3 desc=$4 out
+  rc=1 # failure unless we match content
+  if ! [[ -f "${file}" ]]; then
+    shtest::_log_fail "${id}" "${desc}" "File \"${file}\" not found"
+  elif ! [[ -r "${file}" ]]; then
+    shtest::_log_fail "${id}" "${desc}" "File \"${file}\" unreadable"
+  else
+    unset out
+    { read -r -d '' out || :; } 2>/dev/null < "${file}"
+    if [[ ${out+set} == set ]]; then
+      if [[ ${out} == "${ref}" ]]; then
+        rc=0
+      else
+        shtest::_log_fail "${id}" "${desc}" "${ref}" "${out}"
+      fi
+    else
+      out=$(: 2>&1 >/dev/null < "${file}" || :)
+      [[ ${out} ]] || out="Failed to read \"${file}\""
+      shtest::_log_fail "${id}" "${desc}" "${out}"
+    fi
+  fi
+  return 0
+}
+
+shtest::check_file() { # <id> <filename> <contents> [ <desc> ]
+  local id=${1-} file=${2-} ref=${3-} desc=${4-} rc
+  [[ ${id} && ${file} && ${ref+set} ]] || \
+    shtest::fatal "Usage: shtest::check_file <id> <filename> <contents> [ <desc> ]" 3
+  shtest::_check_entry "${id}" "${desc}" || return 0
+  shtest::_check_file  "${id}" "${file}" "${ref}" "${desc}"
+  [[ ${rc} == 0 ]] && shtest::_log_ok "${id}" "${desc}"
+  return 0
+}
+
+shtest::reg_file() { # [ <filename> ]
+  [[ ${1-} ]] || {
+    local file
+    for file in "${_SHTEST_REG_FILES[@]-}"; do
+      [[ ${file} ]] && echo "${file}"
+    done
+    return 0
+  }
+  _SHTEST_REG_FILES+=("$1")
+}
+
+shtest::dereg_file() { # <filename>
+  local i
+  [[ ${1-} ]] || return 0
+  for i in ${!_SHTEST_REG_FILES[*]}; do
+    [[ ${_SHTEST_REG_FILES[${i}]} == "$1" ]] && unset _SHTEST_REG_FILES["${i}"]
+  done
+}
+
+shtest::check_reg_files() { # <id> <desc> [ <fileX_contents>... ]
+  local id=${1-} desc=${2-} file rc
+  [[ ${id} ]] ||
+    shtest::fatal "Usage: shtest::check_reg_files <id> <desc> [ <fileX_contents>... ]" 3
+  shtest::_check_entry "${id}" "${desc}" || return 0
+  shift 2 || set --
+  for file in "${_SHTEST_REG_FILES[@]-}"; do
+    [[ ${file} ]] || break
+    shtest::_check_file "${id}" "${file}" "${1-}" "${desc}"
+    [[ ${rc} != 0 ]] && return 0
+    shift || set --
+  done
+  shtest::_log_ok "${id}" "${desc}"
+}
+
+shtest::_toreg() { # <retvar> <name/pattern>
+  local pat=${2-}
+  [[ ${1-} && ${pat} ]] || return 1
+  # convert to regex
+  pat=${pat//[*]/.*}; pat=${pat//[?]/.}
+  printf -v "$1" "%s" "${pat}"
+}
+
+shtest::add_focus() { # <id/pattern>
+  local p
+  shtest::_toreg p "${1-}" || return
+  _SHTEST_FOCUS+=("${p}")
+  # mutes log/_log except during test
+  _SHTEST_STATE[8]=1
+  return 0
+}
+
+shtest::save_env() { # <varname>
+  [[ ${1-} ]] || shtest::fatal "Usage: shteset::save_env <varname>" 3
+  { read -r -a "${1}" -d '' || :; } <<< "$1"$'\n'"$(compgen -v)"
+  return 0
+}
+
+shtest::check_env() { # <id> <varname> [ <desc> ]
+  [[ ${1-} && ${2-} ]] ||
+    shtest::fatal "Usage: shtest::check_env <id> <varname> [ <desc> ]" 3
+
+  shtest::_check_entry "$1" "${3-}" || return 0
+
+  local _SHTEST_NAME _SHTEST_ENV="${2}[@]" _SHTEST_NEWVARS=()
+  for _SHTEST_NAME in $(compgen -v); do
+    [[ ${_SHTEST_NAME} =~ ^_SHTEST_(NEWVARS|NAME|ENV)$ ]] && continue
+    [[ ${_SHTEST_NAME} =~ ^(BASH_*|LINES) ]] && continue
+    [[ ${!_SHTEST_ENV} =~ (^| )"${_SHTEST_NAME}"($| ) ]] ||
+      _SHTEST_NEWVARS+=("${_SHTEST_NAME}")
+  done
+  if [[ ${#_SHTEST_NEWVARS[*]} == 0 ]]; then
+    shtest::_log_ok "$1" "${3-}"
+  else
+    shtest::_log_fail "$1" "${3-}" "New variables: ${_SHTEST_NEWVARS[*]}"
+  fi
+  return 0
+}
+
+shtest::parse() { # <file>
+  local file=${1-}
+  [[ ${file} ]] || {
+    shtest::log "Usage: shtest::parse <file>"; return 1; }
+  [[ -f ${file} ]] || {
+    shtest::log "shtest::parse(${file}) not found"; return 1; }
+  bash -n "${file}" || {
+    shtest::log "shtest::parse(${file}) failed"; return 1; }
+}
+
+shtest::summary_report() {
+  local rc=0
+  shtest::_reset_state || :
+  shtest::_log $'\n'"%%%%% SUMMARY REPORT %%%%%"$'\n'
+  shtest::_log "     TESTS RUN: ${_SHTEST_STATE[0]}"
+  shtest::_log "  TESTS PASSED: $(( _SHTEST_STATE[0] - _SHTEST_STATE[1] ))"
+  if [[ ${_SHTEST_STATE[1]} != 0 ]]; then
+    local id msg
+    shtest::_log "  TESTS FAILED: ${_SHTEST_STATE[1]}"
+    msg="    FAILED IDS:"
+    for id in "${_SHTEST_FAILED[@]}"; do
+      msg+=" ${id}"
+    done
+    shtest::_log "${msg}"
+    rc=1
+  fi
+  shtest::_log ""
+  return ${rc}
+}
+
+shtest::quiet() {
+  # mutes all except _log
+  [[ ${_SHTEST_STATE[8]-} ]] || _SHTEST_STATE[8]=2
+}
+
+shtest::_handle_err() {
+  set +eu
+  local wl
+  for wl in ${_SHTEST_WHITELIST[@]+"${_SHTEST_WHITELIST[@]}"}; do
+    [[ ${FUNCNAME[1]} =~ ^${wl}$ ]] && return
+  done
+  for wl in ${_SHTEST_GLOBAL_WHITELIST[@]+"${_SHTEST_GLOBAL_WHITELIST[@]}"}; do
+    [[ ${FUNCNAME[1]} =~ ^${wl}$ ]] && return
+  done
+  # may be in subshell, so touch file to communicate strict failure
+  touch "${_SHTEST_STATE[2]}" || :
+  # rest is backtrace if requested
+  [[ ${_SHTEST_STATE[6]} ]] || return 0
+  shtest::_backtrace 2
+}
+
+shtest::_handle_exit() { # <$?>
+  local -i _shtest_rc=${1-0}
+  # do we still have state? (avoids recursion too)
+  [[ ${_SHTEST_STATE[0]-} ]] || return "${_shtest_rc}"
+  [[ ${BASH_SUBSHELL} == "${_SHTEST_STATE[9]}" ]] || return "${_shtest_rc}"
+  _SHTEST_STATE[8]= # unmute
+  [[ ${_shtest_rc} == 0 ]] && _shtest_rc=1
+  if [[ $- =~ u && ${_shtest_rc} == 1 ]]; then
+    shtest::log "Unexpected exit, likely unbound variable"
+  else
+    shtest::log "Unexpected exit ${_shtest_rc}"
+  fi
+  # always show backtrace on unexpected exit
+  shtest::_backtrace 2
+  local _shtest_next=${_SHTEST_STATE[4]-}
+  shtest::cleanup
+  [[ ${_shtest_next} =~ trap\ --\ \'([^\047]*)\'.* ]] && {
+    eval "${BASH_REMATCH[1]//\$?/\${_shtest_rc}}" || _shtest_rc=$?
+  }
+  return ${_shtest_rc}
+}
+
+shtest::strict() { # [ "trace" ]
+  [[ ${1-} == trace ]] && _SHTEST_STATE[6]=1
+  [[ ${_SHTEST_STATE[2]} ]] && return 0
+  _SHTEST_STATE[2]=$(mktemp -u -t "shtest-strict-XXXXXX") || :
+  [[ ${_SHTEST_STATE[2]} ]] ||
+    shtest::fatal "shtest::strict(): Unable to setup tmpfile"
+  _SHTEST_STATE[4]=$(trap -p EXIT)
+  trap 'shtest::_handle_exit $?' EXIT
+  trap shtest::_handle_err ERR
+  set -eEu
+}
+
+shtest::whitelist() { # <pattern>
+  local p
+  shtest::_toreg p "${1-}" || return
+  _SHTEST_WHITELIST+=("${p}")
+}
+
+shtest::global_whitelist() { # <pattern>
+  local p
+  shtest::_toreg p "${1-}" || return
+  _SHTEST_GLOBAL_WHITELIST+=("${p}")
+}
+
+shtest::verbose() { # [ <level> ]
+  local v=${1-1}
+  [[ ${v} == 0 ]] && v=
+  _SHTEST_STATE[3]=${v}
+}
+
+shtest::reset() {
+  local i state=("${_SHTEST_STATE[@]-}")
+  shtest::cleanup
+  shtest::_init_globals
+  # restore logging state
+  for i in 3 8; do _SHTEST_STATE[${i}]=${state[${i}]-}; done
+}
+
+# initialize everything
+shtest::reset
+
+# Local Variables:
+# mode: sh
+# sh-basic-offset: 2
+# sh-indentation: 2
+# indent-tabs-mode: nil
+# End:

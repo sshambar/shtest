@@ -1,0 +1,27 @@
+
+=== Example Test Scripts ===
+
+Several scripts to demonstrate simple test suites created with
+shtest_setup.
+
+my_funcs - shell functions being testing
+
+good.sh - tests that all succeed
+
+fails:sh - tests that have various kinds of failures
+
+Both good.sh and fails.sh have options to change strict mode and logging:
+  <options> include:
+    help - show help
+    verbose - always show test descriptions
+    quiet - show summary only
+    strict - enable -eEu bash option
+    trace - enable -eEu bash option with traceback
+    +<id/pattern> - show test <id/pattern(*|?)> (may be repeated)
+
+crash.sh - failure cases that lead to the script exiting, options are:
+  'badcall' - shows failure when shtest function is called incorrectly
+  'unbound' - demonstrates unbound variable traceback in strict mode
+  'whitelist' - shows strict mode failure, and whitelisting the caller
+     to allow testing the failure.
+  'dup' - shows failure when test id's are re-used

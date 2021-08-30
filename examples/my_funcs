@@ -1,0 +1,26 @@
+# vim:set ft=sh et sw=2 ts=2:
+
+my_command() {
+  [[ $1 == "-v" ]] && {
+    printf -v "$2" "%s" "${3-}";
+    # set non-local variables
+    othervar=zzz
+    avar=("item 1" "item 2")
+    return 0
+  }
+  echo >&2 "command failed"
+  # reference (possibly unset) variable
+  echo $unset_var
+  # include a function that fails
+  false
+  return 1
+}
+
+my_write() {
+  [[ ${1-} ]] || {
+    echo >&2 "missing file"
+    return 1
+  }
+  echo "file content" > "$1"
+  echo >&2 "wrote file"
+}
