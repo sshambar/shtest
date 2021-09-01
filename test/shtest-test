@@ -414,8 +414,60 @@ ztest::check_reg_files_tests() {
   ztest::expect_output "(<reg-list>)" M12 "${ZTEST_TESTFILE}"$'\n'"${ZTEST_TESTFILE2}"
 }
 
+ztest::log_tests() {
+  local out=''
+  shtest::prefix "shtest::log"
+
+  shtest::log 88>"${ZTEST_OUTPUT}" "test message"
+  ztest::expect_output "()" I1 "test message"
+
+  shtest::prefix "shtest::log_setfd"
+
+  (shtest::log_setfd 88>"${ZTEST_OUTPUT}" "bogus") || :
+  ztest::expect_output "(<badfd>)" I2 \
+                       "FATAL: shtest::set_logfd: bad fd 'bogus'"
+
+  (shtest::log_setfd 88>"${ZTEST_OUTPUT}" "-1") || :
+  ztest::expect_output "(<badnum>)" I3 "FATAL: shtest::set_logfd: bad fd '-1'"
+
+  out=$(shtest::log_setfd 88>"${ZTEST_OUTPUT}")
+  ztest::expect_output "(<no args>)" I4 ""
+  ztest::cmp_test "(<no args>)" I5 "88" "${out}"
+
+  shtest::log_setfd 88>"${ZTEST_OUTPUT}" 2>&88 "2"
+  ztest::expect_output "(2)" I6 ""
+
+  shtest::prefix "shtest::log"
+
+  out=$(shtest::log 2>"${ZTEST_OUTPUT}" 88>&1 "test message")
+  ztest::expect_output "(<stderr>)" I7 "test message"
+  ztest::cmp_test "(<stderr>)" I8 "" "${out}"
+
+  shtest::prefix "shtest::log_setfd"
+
+  out=$(shtest::log_setfd 2>"${ZTEST_OUTPUT}")
+  ztest::expect_output "(<no args>)" I9 ""
+  ztest::cmp_test "(<no args>)" I10 "2" "${out}"
+
+  shtest::log_setfd 88>"${ZTEST_OUTPUT}" 2>&88 "0"
+  ztest::expect_output "(0)" I11 ""
+
+  shtest::prefix "shtest::log"
+
+  out=$(shtest::log 88>"${ZTEST_OUTPUT}" 2>&1 "test message")
+  ztest::expect_output "(<fd88>)" I12 "test message"
+  ztest::cmp_test "(<fd88>)" I13 "" "${out}"
+
+  shtest::prefix "shtest::log_setfd"
+
+  out=$(shtest::log_setfd 88>"${ZTEST_OUTPUT}" 2>&1)
+  ztest::expect_output "(<no args>)" I14 ""
+  ztest::cmp_test "(<no args>)" I15 "88" "${out}"
+}
+
 ztest::misc_tests() {
   local out=''
+
   ztest::prefix "shtest::verbose"
 
   shtest::verbose
@@ -446,11 +498,11 @@ ztest::misc_tests() {
 
   shtest::verbose 0
 
-  ztest::prefix
+  ztest::prefix "duplicate test"
 
   (:; zwrap::check_result XX t "desc"
    :; zwrap::check_result XX t "desc2") || :
-  ztest::expect_output "duplicate test" D1 "FATAL: Duplicate test <id> 'XX'"
+  ztest::expect_output "" D1 "FATAL: Duplicate test <id> 'XX'"
 
   ztest::prefix "shtest::last_check_ok"
 
@@ -498,6 +550,13 @@ ztest::strict_tests() {
   (ztest::fail_strict 88>"${ZTEST_OUTPUT}"; echo "err ignored">>"${ZTEST_OUTPUT}")
   # skip backtrace details
   ztest::expect_output "(<reset)" S4 "Backtrace:" 1
+
+  ztest::prefix "shtest::global_whitelist"
+
+  shtest::global_whitelist ztest::fail_strict
+  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"; echo "err ignored">>"${ZTEST_OUTPUT}")
+  # skip backtrace details
+  ztest::expect_output "(<err ignored)" S5 "err ignored"
 }
 
 ztest::run_tests() { # [ strict ]
@@ -512,6 +571,8 @@ ztest::run_tests() { # [ strict ]
   [[ ${1-} == strict ]] && ztest::strict_tests
 
   ztest::fatal_tests
+
+  ztest::log_tests
 
   ztest::prefix "shtest::title"
 
