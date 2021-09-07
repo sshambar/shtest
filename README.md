@@ -107,6 +107,13 @@ Several examples are in examples/
 
 A test suite for shtest is in test/, just run 'shtest-test'
 
+## Test suite in a box: xtest_setup
+
+A simple wrapper for shtest that handles setting options from the
+command line, and easy test isolation, is available in xtest_setup.
+See that file for instructions, and good.sh and fails.sh in
+examples use it for demo purposes.
+
 ## Useful Tips
 
 * To use shtest_setup, just copy it to your project and source it.
