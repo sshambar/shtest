@@ -349,7 +349,7 @@ ztest::check_reg_files_tests() {
 
   # no files registered
   (zwrap::check_reg_files) || :
-  ztest::expect_output "(<no args>)" M1 "FATAL: Usage: shtest::check_reg_files <id> <desc> [ <fileX_contents>... ]" 1
+  ztest::expect_output "(<no args>)" M1 "FATAL: Usage: shtest::check_reg_files <id> <desc> [ <file#-contents>... ]" 1
 
   zwrap::check_reg_files M2
   ztest::expect_ok "(<no reg>)" M2
@@ -372,8 +372,8 @@ ztest::check_reg_files_tests() {
   ztest::expect_ok "(<match 1>)" M4
 
   # confirm fail
-  zwrap::check_reg_files M5 "(<miss 1>)" "wrong content"
-  ztest::expect_fail "(<miss 1>)" M5 "expected: wrong content"$'\n'"found: test content"
+  zwrap::check_reg_files M5 "(<miss 1>)" "test wrong"
+  ztest::expect_fail "(<miss 1>)" M5 "expected: test wrong"$'\n'"found: test content"
 
   # reg second file
   shtest::reg_file "${ZTEST_TESTFILE2}"
@@ -387,11 +387,14 @@ ztest::check_reg_files_tests() {
   ztest::expect_ok "(<match 2>)" M6
 
   # confirm multi-fail
-  zwrap::check_reg_files M7 "(<miss A>)" "wrong content" "test2 content"
-  ztest::expect_fail "(<miss 2>)" M7 "expected: wrong content"$'\n'"found: test content"
+  zwrap::check_reg_files M7 "(<miss A>)" "test wrong" "test2 content"
+  ztest::expect_fail "(<miss A>)" M7 "expected: test wrong"$'\n'"found: test content"
 
-  zwrap::check_reg_files M8 "(<miss B>)" "test content" "wrong2 content"
-  ztest::expect_fail "(<miss 2>)" M8 "expected: wrong2 content"$'\n'"found: test2 content"
+  zwrap::check_reg_files M8 "(<miss B>)" "test content" "test2 wrong"
+  ztest::expect_fail "(<miss B>)" M8 "expected: test2 wrong"$'\n'"found: test2 content"
+
+  zwrap::check_reg_files M88 "(<miss A+B>)" "test wrong" "test2 wrong"
+  ztest::expect_fail "(<miss A+B>)" M88 "expected: test wrong"$'\n'"found: test content"$'\n'"M88  FAIL | (<miss A+B>) (reg 2)"$'\n'"expected: test2 wrong"$'\n'"found: test2 content"
 
   # missing test arg
   zwrap::check_reg_files M9 "(<short test>)" "test content"
@@ -401,7 +404,7 @@ ztest::check_reg_files_tests() {
   shtest::dereg_file "${ZTEST_TESTFILE2}"
 
   # should ignore extra arg
-  zwrap::check_reg_files M10 "(<dereg>)" "test content" "wrong2 content"
+  zwrap::check_reg_files M10 "(<dereg>)" "test content" "test2 wrong"
   ztest::expect_ok "(<dereg>)" M10
 
   # re-reg file
