@@ -17,6 +17,20 @@ ztest::fail() {
   exit 1
 }
 
+ztest::rm() {
+  [[ ${1-} && -f $1 ]] || return 0
+  command -p rm -f "$@"
+}
+
+ztest::mktemp() {
+  [[ ${1-} ]] || return 1
+  command -p mktemp "$@"
+}
+
+# don't allow shtest_setup to rely on PATH
+# shellcheck disable=SC2123
+PATH=''
+
 # shellcheck source=/dev/null
 . "../shtest_setup" || ztest::fail "Unable to source shtest_setup"
 
@@ -216,7 +230,7 @@ ztest::check_result_tests() {
   ztest::expect_output "(<no args>)" R1 "FATAL: Usage: shtest::check_result <id> <t | f | #> [ <desc> ]" 1
 
   false || zwrap::check_result R2 t
-  ztest::expect_fail "(<false> != t)" R2 "expected: <true>"$'\n'"found: <false>"
+  ztest::expect_fail "(<false> != t)" R2 "expected: <true>"$'\n'"found: <false>(1)"
 
   :; zwrap::check_result R3 f
   ztest::expect_fail "(<true> != f)" R3 "expected: <false>"$'\n'"found: <true>"
@@ -320,7 +334,7 @@ ztest::check_file_tests() {
 
   ztest::prefix "shtest::check_file"
 
-  rm -f "${ZTEST_TESTFILE}"
+  ztest::rm "${ZTEST_TESTFILE}"
   var="error text"$'\n'"second line"
   echo "${var}" > "${ZTEST_TESTFILE}"
 
@@ -337,10 +351,10 @@ ztest::check_file_tests() {
   zwrap::check_file F4 "nofile" ""
   ztest::expect_fail "(<no file>)" F4 "reason: File \"nofile\" not found"
 
-  chmod a-r "${ZTEST_TESTFILE}"
+  command -p chmod a-r "${ZTEST_TESTFILE}"
   zwrap::check_file F5 "${ZTEST_TESTFILE}" ""
   ztest::expect_fail "(<read prot>)" F5 "reason: File \"${ZTEST_TESTFILE}\" unreadable"
-  rm -f "${ZTEST_TESTFILE}"
+  ztest::rm "${ZTEST_TESTFILE}"
 }
 
 ztest::check_reg_files_tests() {
@@ -364,7 +378,7 @@ ztest::check_reg_files_tests() {
   shtest::reg_file "${ZTEST_TESTFILE}"
 
   # populate file
-  rm -f "${ZTEST_TESTFILE}"
+  ztest::rm "${ZTEST_TESTFILE}"
   echo "test content" >"${ZTEST_TESTFILE}"
 
   # confirm ok
@@ -379,7 +393,7 @@ ztest::check_reg_files_tests() {
   shtest::reg_file "${ZTEST_TESTFILE2}"
 
   # populate file
-  rm -f "${ZTEST_TESTFILE2}"
+  ztest::rm "${ZTEST_TESTFILE2}"
   echo "test2 content" >"${ZTEST_TESTFILE2}"
 
   # confirm multi-ok
@@ -631,7 +645,7 @@ ztest::check_ztest_env() {
 ztest::remove_files() { # <file>...
   local file
   for file in "$@"; do
-    [[ ${file} && -f "${file}" ]] && rm -f "${file}"
+    [[ ${file} && -f "${file}" ]] && ztest::rm "${file}"
   done
 }
 
@@ -650,7 +664,7 @@ ztest::handle_exit() { # <$?>
     # display contents of error file, then remove it
     if [[ ${ZTEST_OUTPUT-} && -f "${ZTEST_OUTPUT}" ]]; then
       ztest::err "=== Error file contents ==="
-      cat "${ZTEST_OUTPUT}"
+      command -p cat "${ZTEST_OUTPUT}"
     fi
     ztest::cleanup
   fi
@@ -665,13 +679,13 @@ ztest::handle_exit() { # <$?>
 ZTEST_NEXTEXITTRAP=''$(trap -p EXIT)
 trap 'ztest::handle_exit $?' EXIT
 
-ZTEST_OUTPUT=$(mktemp -u -t "ztest-log-XXXXXX") || :
+ZTEST_OUTPUT=$(ztest::mktemp -u -t "ztest-log-XXXXXX") || :
 [[ ${ZTEST_OUTPUT} ]] ||
   shtest::fail "Unable to create log tmpfile"
-ZTEST_TESTFILE=$(mktemp -u -t "ztest-test-XXXXXX") || :
+ZTEST_TESTFILE=$(ztest::mktemp -u -t "ztest-test-XXXXXX") || :
 [[ ${ZTEST_TESTFILE} ]] ||
   shtest::fail "Unable to create test tmpfile"
-ZTEST_TESTFILE2=$(mktemp -u -t "ztest-test-XXXXXX") || :
+ZTEST_TESTFILE2=$(ztest::mktemp -u -t "ztest-test-XXXXXX") || :
 [[ ${ZTEST_TESTFILE2} ]] ||
   shtest::fail "Unable to create test tmpfile"
 
