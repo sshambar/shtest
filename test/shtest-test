@@ -18,7 +18,7 @@ ztest::fail() {
 }
 
 ztest::rm() {
-  [[ ${1-} && -f $1 ]] || return 0
+  [[ ${1-} ]] || return 0
   command -p rm -f "$@"
 }
 
@@ -50,13 +50,10 @@ ztest::prefix() { # <prefix>
 }
 
 ztest::log_common() { # <id>
-  local tid id=${1-}
+  local id=${1-} IFS; unset IFS
   (( ZTEST_COUNT++ )) || :
-  if [[ ${ZTEST_LIST[*]-} =~ ${id} ]]; then # quicktest
-    for tid in "${ZTEST_LIST[@]}"; do
-      [[ ${id} == "${tid}" ]] && ztest::fail "Duplicate ztest '${id}'"
-    done
-  fi
+  [[ ${ZTEST_LIST[*]-} =~ (^| )${id}($| ) ]] &&
+    ztest::fail "Duplicate ztest '${id}'"
   ZTEST_LIST+=("${id}")
 }
 
@@ -137,6 +134,7 @@ ztest::ok_test() { # <test> <id> <out>
 }
 
 ztest::read_file() { # <filename> [ <rdelim> ] - sets $out or returns 1
+  local IFS; unset IFS
   [[ -r "${1-}" ]] || return 1
   { read -r -d "${2-}" out || :; } < "${1-}"
   # if out set, read worked
@@ -227,10 +225,13 @@ ztest::check_result_tests() {
 
   (zwrap::check_result) || :
   # skip backtrace
-  ztest::expect_output "(<no args>)" R1 "FATAL: Usage: shtest::check_result <id> <t | f | #> [ <desc> ]" 1
+  ztest::expect_output \
+    "(<no args>)" R1 \
+    "FATAL: Usage: shtest::check_result <id> <t | f | #> [ <desc> ]" 1
 
   false || zwrap::check_result R2 t
-  ztest::expect_fail "(<false> != t)" R2 "expected: <true>"$'\n'"found: <false>(1)"
+  ztest::expect_fail "(<false> != t)" R2 \
+                     "expected: <true>"$'\n'"found: <false>(1)"
 
   :; zwrap::check_result R3 f
   ztest::expect_fail "(<true> != f)" R3 "expected: <false>"$'\n'"found: <true>"
@@ -255,11 +256,14 @@ ztest::check_value_tests() {
 
   (zwrap::check_value) || :
   # skip backtrace
-  ztest::expect_output "(<no args>)" V1 "FATAL: Usage: shtest::check_value <id> <varname> [ <value> [ <desc> ] ]" 1
+  ztest::expect_output \
+    "(<no args>)" V1 \
+    "FATAL: Usage: shtest::check_value <id> <varname> [ <value> [ <desc> ] ]" 1
 
   local unset_var; unset unset_var
   zwrap::check_value V2 "unset_var"
-  ztest::expect_fail "(unset_var)" V2 "reason: <varname> 'unset_var' is not set"
+  ztest::expect_fail "(unset_var)" V2 \
+                     "reason: <varname> 'unset_var' is not set"
 
   zwrap::check_value V3 "bad#name"
   ztest::expect_fail "(bad#name)" V3 "reason: invalid <varname> 'bad#name'"
@@ -278,7 +282,9 @@ ztest::check_var_tests() {
 
   (zwrap::check_var) || :
   # skip backtrace
-  ztest::expect_output "(<no args>)" V6 "FATAL: Usage: shtest::check_var <id> [ <value> [ <desc> ] ]" 1
+  ztest::expect_output \
+    "(<no args>)" V6 \
+    "FATAL: Usage: shtest::check_var <id> [ <value> [ <desc> ] ]" 1
 
   unset var
   zwrap::check_var V7 "no value"
@@ -286,10 +292,15 @@ ztest::check_var_tests() {
 
   var="x value"
   zwrap::check_var V8 "y value"
-  ztest::expect_fail "(a != b)" V8 "expected: \"y value\""$'\n'"found: \"x value\""
+  ztest::expect_fail "(a != b)" V8 \
+                     "expected: \"y value\""$'\n'"found: \"x value\""
 
   zwrap::check_var V9 "x value"
   ztest::expect_ok "(a == b)" V9
+
+  zwrap::check_var V10 "y value" "my desc"
+  ztest::expect_fail "(a != b)" V10 \
+                     "expected: \"y value\""$'\n'"found: \"x value\""
 }
 
 ztest::check_array_tests() {
@@ -298,11 +309,15 @@ ztest::check_array_tests() {
 
   (zwrap::check_array) || :
   # skip backtrace
-  ztest::expect_output "(<no args>)" A1 "FATAL: Usage: shtest::check_array <id> <varname> <refname> [ <desc> ]" 1
+  ztest::expect_output \
+    "(<no args>)" A1 \
+    "FATAL: Usage: shtest::check_array <id> <varname> <refname> [ <desc> ]" 1
 
   (zwrap::check_array A2 "bad#name" "bad#ref") || :
   # skip backtrace
-  ztest::expect_output "(bad#name)" A2 "FATAL: shtest::check_array var-names must contain only 'a-zA-Z0-9_'" 1
+  ztest::expect_output \
+    "(bad#name)" A2 \
+    "FATAL: shtest::check_array var-names must contain only 'a-zA-Z0-9_'" 1
 
   avar=("test 1" "test 2") aref=("test 1" "test 2")
   zwrap::check_array A3 "avar" "aref"
@@ -310,14 +325,17 @@ ztest::check_array_tests() {
 
   avar=("test 1" "test 2" "test 3")
   zwrap::check_array A4 "avar" "aref"
-  ztest::expect_fail "(a > b)" A4 "reason: set items in avar (0 1 2) differ from aref (0 1)"
+  ztest::expect_fail "(a > b)" A4 \
+                     "reason: set items in avar (0 1 2) differ from aref (0 1)"
 
   zwrap::check_array A5 "aref" "avar"
-  ztest::expect_fail "(a < b)" A5 "reason: set items in aref (0 1) differ from avar (0 1 2)"
+  ztest::expect_fail "(a < b)" A5 \
+                     "reason: set items in aref (0 1) differ from avar (0 1 2)"
 
   avar=()
   zwrap::check_array A6 "avar" "aref"
-  ztest::expect_fail "('' != b)" A6 "reason: set items in avar () differ from aref (0 1)"
+  ztest::expect_fail "('' != b)" A6 \
+                     "reason: set items in avar () differ from aref (0 1)"
 
   aref=()
   zwrap::check_array A7 "avar" "aref"
@@ -326,7 +344,8 @@ ztest::check_array_tests() {
   # shellcheck disable=SC2034
   avar=("a value" "b value") aref=("a value" "b diff")
   zwrap::check_array A8 "avar" "aref"
-  ztest::expect_fail "(a != b)" A8 "expected: aref[1]=\"b diff\""$'\n'"found: avar[1]=\"b value\""
+  ztest::expect_fail "(a != b)" A8 \
+                     "expected: aref[1]=\"b diff\""$'\n'"found: avar[1]=\"b value\""
 }
 
 ztest::check_file_tests() {
@@ -342,28 +361,35 @@ ztest::check_file_tests() {
   ztest::expect_ok "(a == b)" F1
 
   zwrap::check_file F2 "${ZTEST_TESTFILE}" "diff content"
-  ztest::expect_fail "(a != b)" F2 "expected: diff content"$'\n'"found: error text"$'\n'"second line"
+  ztest::expect_fail "(a != b)" F2 \
+                     "expected: diff content"$'\n'"found: error text"$'\n'"second line"
 
   (zwrap::check_file) || :
   # skip backtrace
-  ztest::expect_output "(<empty filename>)" F3 "FATAL: Usage: shtest::check_file <id> <filename> <contents> [ <desc> ]" 1
+  ztest::expect_output \
+    "(<empty filename>)" F3 \
+    "FATAL: Usage: shtest::check_file <id> <filename> <contents> [ <desc> ]" 1
 
   zwrap::check_file F4 "nofile" ""
   ztest::expect_fail "(<no file>)" F4 "reason: File \"nofile\" not found"
 
   command -p chmod a-r "${ZTEST_TESTFILE}"
   zwrap::check_file F5 "${ZTEST_TESTFILE}" ""
-  ztest::expect_fail "(<read prot>)" F5 "reason: File \"${ZTEST_TESTFILE}\" unreadable"
+  ztest::expect_fail "(<read prot>)" F5 \
+                     "reason: File \"${ZTEST_TESTFILE}\" unreadable"
   ztest::rm "${ZTEST_TESTFILE}"
 }
 
 ztest::check_reg_files_tests() {
+  local out
 
   ztest::prefix "shtest::check_reg_files"
 
   # no files registered
   (zwrap::check_reg_files) || :
-  ztest::expect_output "(<no args>)" M1 "FATAL: Usage: shtest::check_reg_files <id> <desc> [ <file#-contents>... ]" 1
+  ztest::expect_output \
+    "(<no args>)" M1 \
+    "FATAL: Usage: shtest::check_reg_files <id> <desc> [ <file#-contents>... ]" 1
 
   zwrap::check_reg_files M2
   ztest::expect_ok "(<no reg>)" M2
@@ -387,7 +413,8 @@ ztest::check_reg_files_tests() {
 
   # confirm fail
   zwrap::check_reg_files M5 "(<miss 1>)" "test wrong"
-  ztest::expect_fail "(<miss 1>)" M5 "expected: test wrong"$'\n'"found: test content"
+  ztest::expect_fail "(<miss 1>)" M5 \
+                     "expected: test wrong"$'\n'"found: test content"
 
   # reg second file
   shtest::reg_file "${ZTEST_TESTFILE2}"
@@ -402,13 +429,25 @@ ztest::check_reg_files_tests() {
 
   # confirm multi-fail
   zwrap::check_reg_files M7 "(<miss A>)" "test wrong" "test2 content"
-  ztest::expect_fail "(<miss A>)" M7 "expected: test wrong"$'\n'"found: test content"
+  ztest::expect_fail "(<miss A>)" M7 \
+                     "expected: test wrong"$'\n'"found: test content"
 
   zwrap::check_reg_files M8 "(<miss B>)" "test content" "test2 wrong"
-  ztest::expect_fail "(<miss B>)" M8 "expected: test2 wrong"$'\n'"found: test2 content"
+  { read -r -d '' out || :; } <<-EOF
+	expected: test2 wrong
+	found: test2 content
+	EOF
+  ztest::expect_fail "(<miss B>)" M8 "${out}"
 
   zwrap::check_reg_files M88 "(<miss A+B>)" "test wrong" "test2 wrong"
-  ztest::expect_fail "(<miss A+B>)" M88 "expected: test wrong"$'\n'"found: test content"$'\n'"M88  FAIL | (<miss A+B>) (reg 2)"$'\n'"expected: test2 wrong"$'\n'"found: test2 content"
+  { read -r -d '' out || :; } <<-EOF
+	expected: test wrong
+	found: test content
+	M88  FAIL | (<miss A+B>) (reg 2)
+	expected: test2 wrong
+	found: test2 content
+	EOF
+  ztest::expect_fail "(<miss A+B>)" M88 "${out}"
 
   # missing test arg
   zwrap::check_reg_files M9 "(<short test>)" "test content"
@@ -428,7 +467,8 @@ ztest::check_reg_files_tests() {
   ztest::expect_ok "(<re-reg>)" M11
 
   shtest::reg_file >"${ZTEST_OUTPUT}"
-  ztest::expect_output "(<reg-list>)" M12 "${ZTEST_TESTFILE}"$'\n'"${ZTEST_TESTFILE2}"
+  ztest::expect_output "(<reg-list>)" M12 \
+                       "${ZTEST_TESTFILE}"$'\n'"${ZTEST_TESTFILE2}"
 }
 
 ztest::log_tests() {
@@ -543,37 +583,43 @@ ztest::fail_strict() { # 1 - unset var, otherwise just calls false
 }
 
 ztest::strict_tests() {
-  local out
+  local out IFS=$'\n'
   ztest::prefix "shtest::strict"
 
-  { read -r -d '' out || :; } <<< "$(ztest::fail_strict 1 88>&1 2>&1; echo "err ignored")"
+  { read -r -d '' out || :; } \
+    <<< "$(ztest::fail_strict 1 88>&1 2>&1; echo "err ignored")"
   ztest::cmp_test "(<unbound>)" S1 "unbound variable" "${out##*unset_var: }"
 
+  IFS=-
   shtest::strict trace
 
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"; echo "err ignored">>"${ZTEST_OUTPUT}")
+  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
+   echo "err ignored">>"${ZTEST_OUTPUT}")
   # skip backtrace details
   ztest::expect_output "(<backtrace>)" S2 "Backtrace:" 1
 
   ztest::prefix "shtest::whitelist"
 
   shtest::whitelist ztest::fail_strict
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"; echo "err ignored">>"${ZTEST_OUTPUT}")
+  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
+   echo "err ignored">>"${ZTEST_OUTPUT}")
   # skip backtrace details
-  ztest::expect_output "(<err ignored)" S3 "err ignored"
+  ztest::expect_output "(<err ignored>)" S3 "err ignored"
 
   # this should clear whitelist
   shtest::check_result S4 t 88>/dev/null
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"; echo "err ignored">>"${ZTEST_OUTPUT}")
+  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
+   echo "err ignored">>"${ZTEST_OUTPUT}")
   # skip backtrace details
-  ztest::expect_output "(<reset)" S4 "Backtrace:" 1
+  ztest::expect_output "(<reset>)" S4 "Backtrace:" 1
 
   ztest::prefix "shtest::global_whitelist"
 
   shtest::global_whitelist ztest::fail_strict
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"; echo "err ignored">>"${ZTEST_OUTPUT}")
+  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
+   echo "err ignored">>"${ZTEST_OUTPUT}")
   # skip backtrace details
-  ztest::expect_output "(<err ignored)" S5 "err ignored"
+  ztest::expect_output "(<err ignored>)" S5 "err ignored"
 }
 
 ztest::run_tests() { # [ strict ]
@@ -624,15 +670,17 @@ ztest::run_tests() { # [ strict ]
 ztest::save_ztest_env() {
   # save pre-reset env
   ZTEST_ENV=()
+  local IFS=$'\n'
   { read -r -a "ZTEST_ENV" -d '' || :; } <<< "$(compgen -v)"
 }
 
 ztest::check_ztest_env() {
-  local zname znewvars=()
+  local zname znewvars=() IFS; unset IFS
   for zname in $(compgen -v); do
-    [[ ${zname} =~ ^(zname|znewvars)$ ]] && continue
-    [[ ${zname} =~ ^BASH_* ]] && continue
-    [[ ${ZTEST_ENV[*]} =~ (^| )"${zname}"($| ) ]] || znewvars+=("${zname}")
+    [[ ${ZTEST_ENV[*]} =~ (^| )${zname}($| ) ]] && continue
+    [[ ${zname} =~ ^zname|znewvars$ ]] && continue
+    [[ ${zname} =~ ^BASH_.*|LINES|COLUMNS$ ]] && continue
+    znewvars+=("${zname}")
   done
   ztest::prefix "checking env"
   if [[ ${#znewvars[*]} -eq 0 ]]; then
@@ -676,7 +724,7 @@ ztest::handle_exit() { # <$?>
   return $_ztest_rc
 }
 
-ZTEST_NEXTEXITTRAP=''$(trap -p EXIT)
+ZTEST_NEXTEXITTRAP="$(trap -p EXIT)"
 trap 'ztest::handle_exit $?' EXIT
 
 ZTEST_OUTPUT=$(ztest::mktemp -u -t "ztest-log-XXXXXX") || :
@@ -694,7 +742,7 @@ ztest::run_tests
 
 if [[ ${ZTEST_FAILED} -eq 0 ]]; then
   echo -e "\n==== Re-run in strict mode ====\n"
-  ZTEST_COUNT=0 ZTEST_LIST=()
+  ZTEST_COUNT=0 ZTEST_LIST=() IFS=-
 
   # cleanup and save environment
   shtest::cleanup
@@ -703,6 +751,10 @@ if [[ ${ZTEST_FAILED} -eq 0 ]]; then
   # reset shtest, and re-run with strict enabled
   shtest::reset
   ztest::run_tests strict
+
+  [[ ${IFS} == "-" ]]
+  zwrap::check_result IFS t "checking IFS"
+  ztest::expect_output "(IFS == -)" IFS "IFS  OK"
 
   # now cleanup and check for stray variables
   shtest::cleanup
