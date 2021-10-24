@@ -18,12 +18,12 @@ ztest::fail() {
 }
 
 ztest::rm() {
-  [[ ${1-} ]] || return 0
-  command -p rm -f "$@"
+  local f
+  for f in "$@"; do [[ -f $f ]] && command -p rm -f "$f"; done
+  return 0
 }
 
 ztest::mktemp() {
-  [[ ${1-} ]] || return 1
   command -p mktemp "$@"
 }
 
@@ -88,24 +88,31 @@ ztest::strip() { # <var> <text>
   printf -v "$1" "%s" "${BASH_REMATCH[1]-}"
 }
 
+ztest::read_arr() {
+  local IFS=$'\n'
+  read -r -d '' -a "$1" || :
+}
+
 ztest::fail_test() { # <test> <id> <ref> <actual>
-  local IFS=$'\n' name=${1-} id=${2-} nref nout ref out tref tout i
-  { read -r -d '' -a ref || :; } <<< "${3-}"
-  { read -r -d '' -a out || :; } <<< "${4-}"
+  local name=${1-} id=${2-} nref nout aref=() aout=() tref tout i IFS
   unset IFS
-  nref=${#ref[@]} nout=${#out[@]}
+
+  ztest::read_arr aref <<< "${3-}"
+  ztest::read_arr aout <<< "${4-}"
+
+  nref=${#aref[@]} nout=${#aout[@]}
 
   if (( nout == 0 )); then
     ztest::log_fail "${name}" "${id}" "no output"
-  elif ! [[ ${out[0]} =~ ^[[:space:]]*${id}[[:space:]]+FAIL ]]; then
-    ztest::log_fail "${name}" "${id}" "${id} FAIL" "${out[0]}"
+  elif ! [[ ${aout[0]} =~ ^[[:space:]]*${id}[[:space:]]+FAIL ]]; then
+    ztest::log_fail "${name}" "${id}" "${id} FAIL" "${aout[0]}"
   elif (( nout != (nref+1) )); then
-    ztest::strip tout "${out[*]:1}"
+    ztest::strip tout "${aout[*]:1}"
     ztest::log_fail "${name} (exp $((nref+1)) lines, found ${nout})" \
-                    "${id}" "${ref[*]-}" "${tout}"
+                    "${id}" "${aref[*]-}" "${tout}"
   else
     for (( i=1; i<=nref; i++ )); do
-      ztest::strip tout "${out[${i}]}"; tref=${ref[${i}-1]}
+      ztest::strip tout "${aout[${i}]}"; tref=${aref[${i}-1]}
 #      echo "COMPARE: $tref VS $tout"
       [[ ${tref} == "${tout}" ]] || {
         ztest::log_fail "${name} - line ${i}" "${id}" "${tref}" "${tout}"
@@ -118,9 +125,10 @@ ztest::fail_test() { # <test> <id> <ref> <actual>
 }
 
 ztest::ok_test() { # <test> <id> <out>
-  local IFS=$'\n' name=${1-} id=${2-} out nout tout
-  { read -r -d '' -a out || :; } <<< "${3-}"
-  unset IFS
+  local name=${1-} id=${2-} out=() nout tout IFS; unset IFS
+
+  ztest::read_arr out <<< "${3-}"
+
   nout=${#out[@]}
   if (( nout == 0 )); then
     ztest::log_fail "${name}" "${id}" "no output"
@@ -595,6 +603,11 @@ ztest::misc_tests() {
   false || zwrap::check_result O2 t
   out="<false>"; shtest::last_check_ok && out="<true>"
   ztest::cmp_test "(<false>)" O2 "<false>" "${out}"
+
+  :; zwrap::check_result O3 t
+  shtest::reset_state
+  out="<false>"; shtest::last_check_ok && out="<true>"
+  ztest::cmp_test "(<reset_state/false>)" O3 "<false>" "${out}"
 }
 
 ztest::fail_strict() { # 1 - unset var, otherwise just calls false
@@ -607,44 +620,91 @@ ztest::fail_strict() { # 1 - unset var, otherwise just calls false
   return 0
 }
 
+zwrap::fail_strict() {
+  ztest::fail_strict 88>"${ZTEST_OUTPUT}"
+}
+
+ztest::read_var() {
+  local IFS; unset IFS
+  read -r -d '' "$1" || :
+}
+
 ztest::strict_tests() {
-  local out IFS=$'\n'
+  local out
   ztest::prefix "shtest::strict"
 
-  { read -r -d '' out || :; } \
-    <<< "$(ztest::fail_strict 1 88>&1 2>&1; echo "err ignored")"
+  ztest::read_var \
+    out <<< "$(ztest::fail_strict 1 88>&1 2>&1; echo "err ignored")"
   ztest::cmp_test "(<unbound>)" S1 "unbound variable" "${out##*unset_var: }"
 
-  IFS=-
   shtest::strict trace
-
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
-   echo "err ignored">>"${ZTEST_OUTPUT}")
+  (zwrap::fail_strict
+   shtest::reset_state)
   # skip backtrace details
-  ztest::expect_output "(<backtrace>)" S2 "Backtrace:" 1
+  ztest::expect_output "(trace)" S2 "Backtrace:" 1
+
+  shtest::strict notrace
+
+  # check shtest::strict_failed
+  (zwrap::fail_strict
+   shtest::strict_failed && echo "strict error">>"${ZTEST_OUTPUT}"
+   shtest::reset_state)
+  ztest::expect_output "(notrace)" S3 "strict error"
+
+  (zwrap::fail_strict
+   zwrap::check_result S4 t "strict fail")
+  ztest::expect_fail "(strict check)" S4 "reason: strict mode failure"
+
+  (zwrap::fail_strict
+   shtest::reset_state
+   zwrap::check_result S5 t "strict reset")
+  ztest::expect_ok "(<strict-fail/reset_state>)" S5
+
+  shtest::strict off
+
+  # check shtest::strict_failed
+  (zwrap::fail_strict
+   shtest::strict_failed && echo "strict error">>"${ZTEST_OUTPUT}"
+   shtest::reset_state)
+  ztest::expect_output "(off)" S6 ""
+
+  (zwrap::fail_strict
+   zwrap::check_result S7 t)
+  ztest::expect_ok "(off)" S7
+
+  shtest::strict notrace
 
   ztest::prefix "shtest::whitelist"
 
-  shtest::whitelist ztest::fail_strict
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
-   echo "err ignored">>"${ZTEST_OUTPUT}")
-  # skip backtrace details
-  ztest::expect_output "(<err ignored>)" S3 "err ignored"
+  (shtest::whitelist ztest::fail_strict
+   zwrap::fail_strict
+   zwrap::check_result S11 t "strict fail")
+  ztest::expect_ok "(<err ignored>)" S11
 
-  # this should clear whitelist
-  shtest::check_result S4 t 88>/dev/null
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
-   echo "err ignored">>"${ZTEST_OUTPUT}")
-  # skip backtrace details
-  ztest::expect_output "(<reset>)" S4 "Backtrace:" 1
+  # check whitelist cleared by check
+  (shtest::whitelist ztest::fail_strict
+   shtest::check_result S12c t 88>/dev/null
+   zwrap::fail_strict
+   zwrap::check_result S12 t "strict fail")
+  ztest::expect_fail "(<whitelist/check>)" S12 "reason: strict mode failure"
+
+  # check whitelist cleared by reset_state
+  (shtest::whitelist ztest::fail_strict
+   shtest::reset_state
+   zwrap::fail_strict
+   zwrap::check_result S13 t "strict fail")
+  ztest::expect_fail "(<whitelist/reset_state>)" S13 \
+                     "reason: strict mode failure"
 
   ztest::prefix "shtest::global_whitelist"
 
-  shtest::global_whitelist ztest::fail_strict
-  (ztest::fail_strict 88>"${ZTEST_OUTPUT}"
-   echo "err ignored">>"${ZTEST_OUTPUT}")
-  # skip backtrace details
-  ztest::expect_output "(<err ignored>)" S5 "err ignored"
+  (shtest::global_whitelist ztest::fail_strict
+   zwrap::fail_strict
+   zwrap::check_result S21 t "strict fail")
+  ztest::expect_ok "(<err ignored>)" S21
+
+  # now continue in trace mode
+  shtest::strict trace
 }
 
 ztest::run_tests() { # [ strict ]
