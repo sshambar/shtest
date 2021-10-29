@@ -18,12 +18,13 @@ report.
 * Supports various levels of feedback, from verbose to summary only
 * Makes it easy to display output from only selected tests
 * Includes tests of environment to catch stray variables
-* Full support for set -e/-u tests, including backtrace when
+* Full support for set -e/-u tests, including optional backtrace when
   an error is encountered.
 * Section titles, and test name grouping
-* Very limited "name pollution" making it easy to integrate into
+* Very little "name pollution" making it easy to integrate into
   existing projects
 * Logging that's independent of main script's stdout/stderr
+* Exit handlers called if the script exits early (for cleanup)
 * Bash 3.2+ compatibility
 * Thoroughly tested (the test suite library has a test suite :)
 
@@ -52,6 +53,7 @@ Set some options
 	shtest::verbose
 	shtest::strict trace
 	shtest::global_whitelist "my_test_func_*"
+	shtest::add_onexit "mycleanup"
 
 Perform a parse test on your functions, and then source them
 
@@ -140,7 +142,7 @@ examples use it for demo purposes.
 
 * shtest::whitelist can be used for a "one-shot" whitelist.
 
-* shtest::strict trace enables backtraces at failure points.
+* shtest::trace enables backtraces at failure points.
 
 * shtest::add_focus is very useful to isolate just the output
   of a failing test (or test group)
@@ -156,3 +158,16 @@ examples use it for demo purposes.
 	shtest::reg_file "my_stderr"
 	my_func >"my_stdout" 2>"my_stderr"
 	shtest::check_reg_files E1 "testing output" "output text" "err text"
+
+* Onexit functions are useful for cleaning up tempfiles, etc, eg:
+
+	MYTEMP=$(mktemp -u -t "mytemp-XXXXXX")
+	
+	mycleanup() {
+	  [[ -e ${MYTEMP-} ]] && rm -f "${MYTEMP}"
+	}
+	shtest::add_onexit mycleanup
+	exit 0
+
+  NOTE: if shtest::add_onexit is used in a subshell, onexit function
+  if called when the subshell exits

@@ -1,4 +1,6 @@
 #!/bin/bash
+# -*- mode: sh; sh-basic-offset: 2; indent-tabs-mode: nil; -*-
+# vim:set ft=sh et sw=2 ts=2:
 #
 # Test suite for shtest_setup
 #
@@ -9,7 +11,7 @@
 #
 #
 ztest::err() {
-  echo >&2 "$*"
+  printf >&2 '%s\n' "$*"
 }
 
 ztest::fail() {
@@ -39,7 +41,6 @@ ZTEST_COUNT=0
 ZTEST_FAILED=0
 ZTEST_LIST=()
 ZTEST_ENV=()
-ZTEST_NEXTEXITTRAP=''
 ZTEST_EXITLVL=${BASH_SUBSHELL}
 ZTEST_OUTPUT=''
 ZTEST_TESTFILE=''
@@ -352,8 +353,9 @@ ztest::check_array_tests() {
   # shellcheck disable=SC2034
   avar=("a value" "b value") aref=("a value" "b diff")
   zwrap::check_array A8 "avar" "aref"
-  ztest::expect_fail "(a != b)" A8 \
-                     "expected: aref[1]=\"b diff\""$'\n'"found: avar[1]=\"b value\""
+  ztest::expect_fail \
+    "(a != b)" A8 \
+    "expected: aref[1]=\"b diff\""$'\n'"found: avar[1]=\"b value\""
 }
 
 ztest::check_file_tests() {
@@ -369,8 +371,9 @@ ztest::check_file_tests() {
   ztest::expect_ok "(a == b)" F1
 
   zwrap::check_file F2 "${ZTEST_TESTFILE}" "diff content"
-  ztest::expect_fail "(a != b)" F2 \
-                     "expected: diff content"$'\n'"found: error text"$'\n'"second line"
+  ztest::expect_fail \
+    "(a != b)" F2 \
+    "expected: diff content"$'\n'"found: error text"$'\n'"second line"
 
   (zwrap::check_file) || :
   # skip backtrace
@@ -481,20 +484,27 @@ ztest::check_reg_files_tests() {
 
 ztest::log_tests() {
   local out=''
-  shtest::prefix "shtest::log"
+  ztest::prefix "shtest::log"
+
+  # check that stderr gets dup'd for log
+  (shtest::cleanup
+   shtest::reset
+   shtest::log "test message"
+   shtest::cleanup) 2>"${ZTEST_OUTPUT}"
+  ztest::expect_output "()" I0 "test message"
 
   shtest::log 88>"${ZTEST_OUTPUT}" "test message"
   ztest::expect_output "()" I1 "test message"
 
-  shtest::prefix "shtest::log_setfd"
+  ztest::prefix "shtest::log_setfd"
 
   (shtest::log_setfd 88>"${ZTEST_OUTPUT}" "bogus") || :
   ztest::expect_output "(<badfd>)" I2 \
-                       "FATAL: shtest::set_logfd: bad fd 'bogus'" 1
+                       "FATAL: shtest::log_setfd: bad fd 'bogus'" 1
 
   (shtest::log_setfd 88>"${ZTEST_OUTPUT}" "-1") || :
   ztest::expect_output "(<badnum>)" I3 \
-                       "FATAL: shtest::set_logfd: bad fd '-1'" 1
+                       "FATAL: shtest::log_setfd: bad fd '-1'" 1
 
   out=$(shtest::log_setfd 88>"${ZTEST_OUTPUT}")
   ztest::expect_output "(<no args>)" I4 ""
@@ -503,13 +513,13 @@ ztest::log_tests() {
   shtest::log_setfd 88>"${ZTEST_OUTPUT}" 2>&88 "2"
   ztest::expect_output "(2)" I6 ""
 
-  shtest::prefix "shtest::log"
+  ztest::prefix "shtest::log"
 
   out=$(shtest::log 2>"${ZTEST_OUTPUT}" 88>&1 "test message")
   ztest::expect_output "(<stderr>)" I7 "test message"
   ztest::cmp_test "(<stderr>)" I8 "" "${out}"
 
-  shtest::prefix "shtest::log_setfd"
+  ztest::prefix "shtest::log_setfd"
 
   out=$(shtest::log_setfd 2>"${ZTEST_OUTPUT}")
   ztest::expect_output "(<no args>)" I9 ""
@@ -518,13 +528,13 @@ ztest::log_tests() {
   shtest::log_setfd 88>"${ZTEST_OUTPUT}" 2>&88 "0"
   ztest::expect_output "(0)" I11 ""
 
-  shtest::prefix "shtest::log"
+  ztest::prefix "shtest::log"
 
   out=$(shtest::log 88>"${ZTEST_OUTPUT}" 2>&1 "test message")
   ztest::expect_output "(<fd88>)" I12 "test message"
   ztest::cmp_test "(<fd88>)" I13 "" "${out}"
 
-  shtest::prefix "shtest::log_setfd"
+  ztest::prefix "shtest::log_setfd"
 
   out=$(shtest::log_setfd 88>"${ZTEST_OUTPUT}" 2>&1)
   ztest::expect_output "(<no args>)" I14 ""
@@ -586,13 +596,19 @@ ztest::misc_tests() {
   :; zwrap::check_result F8 f "desc"
   ztest::expect_output "(<focus match>)" L9 "F8   FAIL | desc" 1
 
+  ztest::prefix "shtest::alert"
+
+  :; shtest::alert 88>"${ZTEST_OUTPUT}" "alert test"
+  ztest::expect_output "(<with focus set>)" L10 "alert test"
+
   shtest::reset
 
   ztest::prefix "duplicate test"
 
   (:; zwrap::check_result XX t "desc"
    :; zwrap::check_result XX t "desc2") || :
-  ztest::expect_output "" D1 "FATAL: shtest::check_result: Duplicate test <id> 'XX'" 1
+  ztest::expect_output \
+    "" D1 "FATAL: shtest::check_result: Duplicate test <id> 'XX'" 1
 
   ztest::prefix "shtest::last_check_ok"
 
@@ -608,6 +624,89 @@ ztest::misc_tests() {
   shtest::reset_state
   out="<false>"; shtest::last_check_ok && out="<true>"
   ztest::cmp_test "(<reset_state/false>)" O3 "<false>" "${out}"
+}
+
+ztest::onexit1() {
+  shtest::alert "in exit1: ${1-}"
+}
+
+ztest::onexit2() {
+  shtest::alert "in exit2: ${1-}"
+}
+
+ztest::onexit_tests() {
+  local out='' exp
+  ztest::prefix "shtest::add_onexit"
+
+  out=$(shtest::log_setfd 1
+        shtest::strict off
+        shtest::add_onexit ztest::onexit1
+        exit 0)
+  ztest::read_var exp <<-EOF
+	in exit1: 0
+	EOF
+  ztest::cmp_test "(<1 onexit>)" T1 "${exp}" "${out}"
+
+  out=$(shtest::log_setfd 1
+        shtest::strict off
+        shtest::add_onexit ztest::onexit1
+        shtest::add_onexit ztest::onexit2
+        exit 1) || :
+  ztest::read_var exp <<-EOF
+	in exit1: 1
+	in exit2: 1
+	EOF
+  ztest::cmp_test "(<2 onexit>)" T2 "${exp}" "${out}"
+
+  out=$(shtest::log_setfd 1
+        shtest::strict off
+        shtest::add_onexit ztest::onexit1
+        shtest::add_onexit ztest::onexit2
+        shtest::add_onexit
+        shtest::cleanup)
+  ztest::cmp_test "(<no args>)" T3 \
+                  "ztest::onexit1"$'\n'"ztest::onexit2" "${out}"
+
+  ztest::prefix "shtest::remove_onexit"
+
+  out=$(shtest::log_setfd 1
+        shtest::strict off
+        shtest::add_onexit ztest::onexit1
+        shtest::add_onexit ztest::onexit2
+        shtest::remove_onexit ztest::onexit1)
+  ztest::read_var exp <<-EOF
+	in exit2: 0
+	EOF
+  ztest::cmp_test "(<1 removed, no exit>)" T11 "${exp}" "${out}"
+
+  out=$(shtest::log_setfd 1
+        shtest::strict off
+        shtest::add_onexit ztest::onexit1
+        shtest::remove_onexit ztest::onexit1
+        exit 0)
+  ztest::cmp_test "(<removed>)" T12 "" "${out}"
+
+  ztest::prefix "shtest::trace"
+
+  out=$(shtest::reset
+        shtest::log_setfd 1
+        shtest::trace on
+        exit 0)
+  ztest::cmp_test "(<exit trace>)" T21 "Unexpected exit 0"$'\n'"Back" \
+                  "${out%%trace:*}"
+
+  shtest::trace off
+
+  out=$(shtest::reset
+        shtest::log_setfd 1
+        shtest::trace on
+        shtest::trace off
+        exit 1) || :
+  ztest::cmp_test "(<exit trace off>)" T22 \
+                  "Unexpected exit 1 (try trace for details)" "${out}"
+
+  # remove any strict test failures
+  shtest::reset_state
 }
 
 ztest::fail_strict() { # 1 - unset var, otherwise just calls false
@@ -630,26 +729,33 @@ ztest::read_var() {
 }
 
 ztest::strict_tests() {
-  local out
+  local out exp
   ztest::prefix "shtest::strict"
+
+  shtest::strict
 
   ztest::read_var \
     out <<< "$(ztest::fail_strict 1 88>&1 2>&1; echo "err ignored")"
   ztest::cmp_test "(<unbound>)" S1 "unbound variable" "${out##*unset_var: }"
 
-  shtest::strict trace
-  (zwrap::fail_strict
-   shtest::reset_state)
+  out=$(shtest::strict trace
+        shtest::log_setfd 1
+        zwrap::fail_strict
+        shtest::cleanup)
   # skip backtrace details
-  ztest::expect_output "(trace)" S2 "Backtrace:" 1
+  ztest::cmp_test "(trace)" S2 \
+                  "Strict mode failure"$'\n'"Back" "${out%%trace:*}"
 
   shtest::strict notrace
 
   # check shtest::strict_failed
-  (zwrap::fail_strict
-   shtest::strict_failed && echo "strict error">>"${ZTEST_OUTPUT}"
-   shtest::reset_state)
-  ztest::expect_output "(notrace)" S3 "strict error"
+  out=$(shtest::log_setfd 1
+        ztest::fail_strict
+        shtest::strict_failed && echo "strict error"
+        shtest::reset_state)
+  ztest::cmp_test "(notrace)" S3 \
+                  "mode failure (try trace for details)"$'\n'"strict error" \
+                  "${out##*Strict }"
 
   (zwrap::fail_strict
    zwrap::check_result S4 t "strict fail")
@@ -671,6 +777,48 @@ ztest::strict_tests() {
   (zwrap::fail_strict
    zwrap::check_result S7 t)
   ztest::expect_ok "(off)" S7
+
+  local exp_rc=1
+  # old bash versions didn't pass 1 to exit traps on unbound :P
+  (( BASH_VERSINFO[0] < 4 )) && exp_rc=0
+  out=$(exec 2>&1
+        shtest::reset
+        shtest::log_setfd 1
+        shtest::strict trace
+        ztest::fail_strict 1) || :
+  out=${out%%trace:*}
+  ztest::read_var exp <<-EOF
+	unbound variable
+	Unexpected exit ${exp_rc}
+	Back
+	EOF
+  ztest::cmp_test "(<unbound>)" S8 "${exp}" "${out##*unset_var: }"
+
+  out=$(exec 2>&1
+        shtest::reset
+        shtest::log_setfd 1
+        shtest::strict
+        shtest::add_onexit ztest::onexit1
+        ztest::fail_strict 1) || :
+  ztest::read_var exp <<-EOF
+	unbound variable
+	Unexpected exit ${exp_rc} (try trace for details)
+	in exit1: ${exp_rc}
+	EOF
+  ztest::cmp_test "(<add_onexit>)" S9 "${exp}" "${out##*unset_var: }"
+
+  out=$(exec 2>&1
+        shtest::reset
+        shtest::log_setfd 1
+        shtest::strict
+        shtest::add_onexit ztest::onexit1
+        shtest::remove_onexit ztest::onexit1
+        ztest::fail_strict 1) || :
+  ztest::read_var exp <<-EOF
+	unbound variable
+	Unexpected exit ${exp_rc} (try trace for details)
+	EOF
+  ztest::cmp_test "(<remove_onexit>)" S10 "${exp}" "${out##*unset_var: }"
 
   shtest::strict notrace
 
@@ -703,16 +851,14 @@ ztest::strict_tests() {
    zwrap::check_result S21 t "strict fail")
   ztest::expect_ok "(<err ignored>)" S21
 
-  # now continue in trace mode
-  shtest::strict trace
+  # now continue in notrace mode
+  shtest::strict notrace
 }
 
 ztest::run_tests() { # [ strict ]
 
   # shellcheck disable=SC2034
   local test_env
-
-  [[ ${1-} == strict ]] && shtest::strict
 
   shtest::save_env "test_env"
 
@@ -725,7 +871,7 @@ ztest::run_tests() { # [ strict ]
   ztest::prefix "shtest::title"
 
   shtest::title 88>"${ZTEST_OUTPUT}" "ztest title"
-  ztest::expect_output "(<title>)" T3 "===== ztest title ====="
+  ztest::expect_output "(<title>)" TT "===== ztest title ====="
 
   ztest::check_result_tests
 
@@ -738,6 +884,8 @@ ztest::run_tests() { # [ strict ]
   ztest::check_file_tests
 
   ztest::check_reg_files_tests
+
+  ztest::onexit_tests
 
   ztest::misc_tests
 
@@ -789,27 +937,20 @@ ztest::cleanup() {
 }
 
 ztest::handle_exit() { # <$?>
-  local _ztest_rc=${1-0}
   # avoid any recursion...
-  [[ ${ZTEST_EXITLVL} ]] || return "${_ztest_rc}"
+  [[ ${ZTEST_EXITLVL-} ]] || return 0
   # only cleanup files if at toplevel
-  if [[ ${BASH_SUBSHELL} == "${ZTEST_EXITLVL}" ]]; then
+  if (( BASH_SUBSHELL <= ZTEST_EXITLVL )); then
     # display contents of error file, then remove it
     if [[ ${ZTEST_OUTPUT-} && -f "${ZTEST_OUTPUT}" ]]; then
       ztest::err "=== Error file contents ==="
-      command -p cat "${ZTEST_OUTPUT}"
+      printf >&2 '%s' "$(< "${ZTEST_OUTPUT}")"
     fi
     ztest::cleanup
   fi
   ZTEST_EXITLVL=''
-  [[ ${ZTEST_NEXTEXITTRAP} =~ trap\ --\ \'([^\047]*)\'.* ]] && {
-    eval "${BASH_REMATCH[1]//\$?/\${_ztest_rc}}" || _ztest_rc=$?
-  }
-
-  return $_ztest_rc
 }
 
-ZTEST_NEXTEXITTRAP="$(trap -p EXIT)"
 trap 'ztest::handle_exit $?' EXIT
 
 ZTEST_OUTPUT=$(ztest::mktemp -u -t "ztest-log-XXXXXX") || :
@@ -822,15 +963,16 @@ ZTEST_TESTFILE2=$(ztest::mktemp -u -t "ztest-test-XXXXXX") || :
 [[ ${ZTEST_TESTFILE2} ]] ||
   shtest::fail "Unable to create test tmpfile"
 
-echo -e "\n==== Run in normal mode ====\n"
+printf '\n%s\n\n' "==== Run in normal mode ===="
 ztest::run_tests
 
+shtest::cleanup
+
 if [[ ${ZTEST_FAILED} -eq 0 ]]; then
-  echo -e "\n==== Re-run in strict mode ====\n"
+  printf '\n%s\n\n' "==== Re-run in strict mode ===="
   ZTEST_COUNT=0 ZTEST_LIST=() IFS=-
 
   # cleanup and save environment
-  shtest::cleanup
   ztest::save_ztest_env
 
   # reset shtest, and re-run with strict enabled
@@ -846,7 +988,12 @@ if [[ ${ZTEST_FAILED} -eq 0 ]]; then
   ztest::check_ztest_env
 fi
 
-echo -e "\n==== FINAL REPORT ====\n"
+ZTEST_TRAP=''
+[[ $(trap -p EXIT) =~ trap\ --\ \'([^\047]*)\'.* ]] &&
+  ZTEST_TRAP=${BASH_REMATCH[1]}
+ztest::cmp_test "(trap restored)" FT 'ztest::handle_exit $?' "${ZTEST_TRAP}"
+
+printf '\n%s\n\n' "==== FINAL REPORT ===="
 echo "     TESTS RUN: ${ZTEST_COUNT}"
 echo "  TESTS PASSED: $(( ZTEST_COUNT - ZTEST_FAILED ))"
 [[ ${ZTEST_FAILED} -ne 0 ]] && echo "   TEST FAILED: ${ZTEST_FAILED}"
