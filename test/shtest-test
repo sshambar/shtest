@@ -283,6 +283,10 @@ ztest::check_value_tests() {
 
   zwrap::check_value V5 "val" "value a"
   ztest::expect_ok "(a == b)" V5
+
+  local val2="value b"
+  zwrap::check_value V6 "val2" "value b"
+  ztest::expect_ok "(a == b)" V6
 }
 
 ztest::check_var_tests() {
@@ -292,23 +296,23 @@ ztest::check_var_tests() {
   (zwrap::check_var) || :
   # skip backtrace
   ztest::expect_output \
-    "(<no args>)" V6 \
+    "(<no args>)" C1 \
     "FATAL: Usage: shtest::check_var <id> [ <value> [ <desc> ] ]" 1
 
   unset var
-  zwrap::check_var V7 "no value"
-  ztest::expect_fail "(<unset>)" V7 "reason: <varname> 'var' is not set"
+  zwrap::check_var C2 "no value"
+  ztest::expect_fail "(<unset>)" C2 "reason: <varname> 'var' is not set"
 
   var="x value"
-  zwrap::check_var V8 "y value"
-  ztest::expect_fail "(a != b)" V8 \
+  zwrap::check_var C3 "y value"
+  ztest::expect_fail "(a != b)" C3 \
                      "expected: \"y value\""$'\n'"found: \"x value\""
 
-  zwrap::check_var V9 "x value"
-  ztest::expect_ok "(a == b)" V9
+  zwrap::check_var C4 "x value"
+  ztest::expect_ok "(a == b)" C4
 
-  zwrap::check_var V10 "y value" "my desc"
-  ztest::expect_fail "(a != b)" V10 \
+  zwrap::check_var C5 "y value" "my desc"
+  ztest::expect_fail "(a != b)" C5 \
                      "expected: \"y value\""$'\n'"found: \"x value\""
 }
 
