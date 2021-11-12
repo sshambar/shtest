@@ -55,12 +55,15 @@ xtest::group2::files() {
   shtest::prefix "my_write: "
 
   rm -f "$testfile" "$output"
+  echo "ref content"$'\n'"with more lines" >"$testfile"
   my_write 2>"$output"
   shtest::check_result F1 t "returns true"
   shtest::check_reg_files F2 "mismatch content" "wrote file" "some text"
+  rm -f "$testfile"
   shtest::check_reg_files F3 "file missing" "missing file"
 
   rm -f "$testfile" "$output"
 }
 
 xtest::run_tests "" "$@"
+shtest::cleanup

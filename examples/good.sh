@@ -62,3 +62,4 @@ xtest::group2::files() {
 }
 
 xtest::run_tests "Good Test Results" "$@"
+shtest::cleanup
