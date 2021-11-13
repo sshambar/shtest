@@ -382,7 +382,7 @@ ztest::check_array_tests() {
   ztest::read_var ref <<-EOF
 	diff: <expected> <found>
 	2a3
-	> ["2"]=test 3
+	> [2]='test 3'
 	EOF
   ztest::expect_fail "(a > b)" A4 "${ref}"
 
@@ -390,7 +390,7 @@ ztest::check_array_tests() {
   ztest::read_var ref <<-EOF
 	diff: <expected> <found>
 	3d2
-	< ["2"]=test 3
+	< [2]='test 3'
 	EOF
   ztest::expect_fail "(a < b)" A5 "${ref}"
 
@@ -399,8 +399,8 @@ ztest::check_array_tests() {
   ztest::read_var ref <<-EOF
 	diff: <expected> <found>
 	1,2c1
-	< ["0"]=test 1
-	< ["1"]=test 2
+	< [0]='test 1'
+	< [1]='test 2'
 	---
 	> 
 	EOF
@@ -415,9 +415,9 @@ ztest::check_array_tests() {
   ztest::read_var ref <<-EOF
 	diff: <expected> <found>
 	2c2
-	< ["1"]=b diff
+	< [1]='b diff'
 	---
-	> ["1"]=b value
+	> [1]='b value'
 	EOF
   ztest::expect_fail "(a != b)" A8 "${ref}"
 
@@ -427,16 +427,16 @@ ztest::check_array_tests() {
 
   if (( BASH_VERSINFO[0] >= 4 )); then
     declare -A avar2=([first]='multi word' ['2nd'$'\n''item']='"with"!;exit"' \
-			     [\'special\$aref\']="\"and \$var(2\"" )
+			     [\'special\$aref\']="\"and \$var(2'\"" )
     declare -A aref2=([first]='multi word' ['2nd'$'\n''item']='"with"!;exit"' \
-			     [\'special\$aref\']="\"and \$var(\"" )
+			     [\'special\$aref\']="\"and \$var('\"" )
     zwrap::check_array A11 "avar2" "aref2"
     ztest::read_var ref <<-"EOF"
 	diff: <expected> <found>
 	3c3
-	< ["'special$aref'"]="and $var("
+	< ['special$aref']='"and $var('"'
 	---
-	> ["'special$aref'"]="and $var(2"
+	> ['special$aref']='"and $var(2'"'
 	EOF
     ztest::expect_fail "(a != b)" A11 "${ref}"
   fi

@@ -1,7 +1,7 @@
 # -*- mode: sh; sh-basic-offset: 2; indent-tabs-mode: nil; -*-
 # vim:set ft=sh et sw=2 ts=2:
 #
-# shtest v1.5.0 - Shell script testing functions
+# shtest v1.5.1 - Shell script testing functions
 # Author: Scott Shambarger <devel@shambarger.net>
 #
 # Copyright (C) 2021 Scott Shambarger
@@ -532,12 +532,12 @@ shtest::check_array() { # <id> <varname> <refname> [ <desc> ]
 
   for _i in ${_vn[*]+"${_vn[@]}"}; do
     _j=${_i//$'\n'/\$\'\\n\'}
-    eval "_va+=(\"[\\\"\${_j}\\\"]=\${$2[\"\${_i}\"]}\")"
+    eval "_va+=(\"[\${_j}]='\${$2[\"\${_i}\"]}'\")"
   done
   for _i in ${_rn[*]+"${_rn[@]}"}; do
     # shellcheck disable=SC2034
     _j=${_i//$'\n'/\$\'\\n\'}
-    eval "_ra+=(\"[\\\"\${_j}\\\"]=\${$3[\"\${_i}\"]}\")"
+    eval "_ra+=(\"[\${_j}]='\${$3[\"\${_i}\"]}'\")"
   done
   # quote lhs as _va values may have newlines (bash3 breaks)
   [[ "${_va[*]-}" != "${_ra[*]-}" ]] && {
