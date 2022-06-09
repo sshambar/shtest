@@ -433,7 +433,7 @@ ztest::check_array_tests() {
     zwrap::check_array A11 "avar2" "aref2"
     ztest::read_var ref <<-"EOF"
 	diff: <expected> <found>
-	3c3
+	1c1
 	< ['special$aref']='"and $var('"'
 	---
 	> ['special$aref']='"and $var(2'"'

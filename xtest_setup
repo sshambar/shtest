@@ -1,4 +1,4 @@
-# -*- mode: sh; sh-basic-offset: 2; indent-tabs-mode: nil; -*-
+# -*- mode: sh; sh-shell: bash; sh-basic-offset: 2; indent-tabs-mode: nil; -*-
 # vim:set ft=sh et sw=2 ts=2:
 #
 # xtest_setup v1.2.1 - shtest suite in a box
