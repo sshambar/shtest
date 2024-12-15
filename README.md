@@ -54,6 +54,7 @@ Set some options
 	shtest::strict trace
 	shtest::global_whitelist "my_test_func_*"
 	shtest::add_onexit "mycleanup"
+	shtest::clean_env -strict
 
 Perform a parse test on your functions, and then source them
 

@@ -1,6 +1,7 @@
 #!/bin/bash
 # -*- mode: sh; sh-basic-offset: 2; indent-tabs-mode: t; -*-
 # vim:set ft=sh sw=2 ts=2:
+# SPDX-License-Identifier: LGPL-3.0-or-later
 #
 # Test suite for shtest_setup
 #
@@ -30,17 +31,19 @@ ztest::mktemp() {
   command -p mktemp "$@"
 }
 
-PATH=/bin:/usr/bin:/usr/local/bin
-ZTEST_DIFF=$(command -p -v diff)
+# shellcheck source=/dev/null
+. "../shtest_setup" || ztest::fail "Unable to source shtest_setup"
 
-[[ -z ${ZTEST_DIFF} ]] && ztest::fail "Unable to find diff"
+shtest::clean_env -strict
 
 # don't allow shtest_setup to rely on PATH
 # shellcheck disable=SC2123
 PATH=''
 
-# shellcheck source=/dev/null
-. "../shtest_setup" || ztest::fail "Unable to source shtest_setup"
+# handle bash3 bug with -p -v
+ZTEST_DIFF=$(PATH=/bin:/usr/bin command -p -v diff)
+
+[[ -z ${ZTEST_DIFF} ]] && ztest::fail "Unable to find diff"
 
 ZTEST_PREFIX=''
 ZTEST_COUNT=0
@@ -598,9 +601,9 @@ ztest::log_tests() {
 
   ztest::prefix "shtest::log_setfd"
 
-  (shtest::log_setfd 88>"${ZTEST_OUTPUT}" "bogus") || :
+  (shtest::log_setfd 88>"${ZTEST_OUTPUT}" "bad_fd") || :
   ztest::expect_output "(<badfd>)" I2 \
-                       "FATAL: shtest::log_setfd: bad fd 'bogus'" 1
+                       "FATAL: shtest::log_setfd: bad fd 'bad_fd'" 1
 
   (shtest::log_setfd 88>"${ZTEST_OUTPUT}" "-1") || :
   ztest::expect_output "(<badnum>)" I3 \
@@ -724,6 +727,41 @@ ztest::misc_tests() {
   shtest::reset_state
   out="<false>"; shtest::last_check_ok && out="<true>"
   ztest::cmp_test "(<reset_state/false>)" O3 "<false>" "${out}"
+}
+
+ztest::clean_env_tests() {
+
+  ztest::prefix "shtest::clean_env"
+
+  (
+    SHELL=mysh TERM=myterm out=bogus
+    shtest::clean_env
+    [[ ${TERM+set} ]] && echo "'TERM' not unset"
+    [[ ${out+set} ]] && echo "'out' not unset"
+    :
+  ) &> "${ZTEST_OUTPUT}"
+  ztest::expect_output "(<no args>)" N1 ""
+
+  (
+    SHELL=mysh TERM=myterm out=bogus
+    shtest::clean_env -loose
+    [[ ${TERM-} != myterm ]] && echo "'TERM' unset"
+    [[ ${out+set} ]] && echo "'out' not unset"
+    :
+  ) &> "${ZTEST_OUTPUT}"
+  ztest::expect_output "(-loose)" N2 ""
+
+  # SHELL can't be local or it's reset to global
+  (
+    SHELL=mysh TERM=myterm out=bogus
+    shtest::clean_env -strict TERM
+    [[ ${SHELL+set} ]] && echo "'SHELL' not unset $SHELL"
+    [[ ${TERM-} != myterm ]] && echo "'TERM' unset but allowed"
+    [[ ${out+set} ]] && echo "'out' not unset"
+    :
+  ) &> "${ZTEST_OUTPUT}"
+  ztest::expect_output "(-strict)" N3 ""
+
 }
 
 ztest::onexit1() {
@@ -951,9 +989,9 @@ ztest::strict_tests() {
 
 ztest::run_tests() { # [ strict ]
 
-  local test_env
+  local ZTEST_SAVED
 
-  shtest::save_env "test_env"
+  shtest::save_env "ZTEST_SAVED"
 
   [[ ${1-} == strict ]] && ztest::strict_tests
 
@@ -980,15 +1018,17 @@ ztest::run_tests() { # [ strict ]
 
   ztest::onexit_tests
 
+  ztest::clean_env_tests
+
   ztest::misc_tests
 
   ztest::prefix "shtest::check_env"
 
-  shtest::check_env 88>"${ZTEST_OUTPUT}" E1 "test_env"
+  shtest::check_env 88>"${ZTEST_OUTPUT}" E1 "ZTEST_SAVED"
   ztest::expect_ok "(<ok>)" E1
 
   local bogus_var=''
-  shtest::check_env 88>"${ZTEST_OUTPUT}" E2 "test_env"
+  shtest::check_env 88>"${ZTEST_OUTPUT}" E2 "ZTEST_SAVED"
   ztest::expect_fail "(<fail>)" E2 "      reason: New variables: bogus_var"
 }
 
